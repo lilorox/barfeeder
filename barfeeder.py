@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import i3ipc
 import json
+import math
 import os
 import signal
 import time
@@ -31,6 +32,28 @@ colors = {
     "light black": "#ff665c54",
     "dark black": "#ff1d2021",
 }
+icons = {
+    "battery": {
+        "discharging": [
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+        "charging": ""
+    },
+    "date": "",
+    "time": "",
+    "cpu": "",
+    "memory": "",
+    "disk": "",
+    "network": {
+        "upspeed": "",
+        "downspeed": "",
+        "wifi_ssid": ""
+    },
+}
 
 class StatusThread(Thread):
     def __init__(self, source_id, queue):
@@ -57,16 +80,33 @@ class DateTimeThread(StatusThread):
         super().__init__(source_id, queue)
         self.timeout = timeout
 
+    def format_output(self, current_date, current_time):
+        return (
+            "%%{B%s T2}   %s %%{T1} %s"
+            "%%{T2}%s  %%{T1}%s   %%{F- B-}"
+        ) % (
+            colors["light black"],
+            icons["date"],
+            current_date,
+            icons["time"],
+            current_time
+        )
+
     def run(self):
-        previous = ""
+        previous_date = ""
+        previous_time = ""
         while True:
-            current = datetime.now().strftime('%d-%m-%Y %H:%M')
-            if previous != current:
+            now = datetime.now()
+            current_date = now.strftime('%d-%m-%Y')
+            current_time = now.strftime('%H:%M')
+
+            if previous_date != current_date or previous_time != current_time:
                 self.q.put({
                     "id": self.id,
-                    "output": current
+                    "output": self.format_output(current_date, current_time)
                 })
-            previous = current
+            previous_date = current_date
+            previous_time = current_time
             time.sleep(self.timeout)
 
 
@@ -81,9 +121,30 @@ class BatteryThread(StatusThread):
         self.sys_ac_file = sys_ac_file
 
     def format_output(self, capacity, ac_status):
+        icon = ""
+        fg_color = colors["foreground"]
+        bg_color = colors["light black"]
         if ac_status == "C":
+            icon = icons["battery"]["charging"]
+        else:
+            index = math.floor(capacity * len(icons["battery"]["discharging"]) / 100)
+            icon = icons["battery"]["discharging"][index]
 
-        pass
+        if capacity < 10:
+            fg_color = colors["light red"]
+            bg_color = colors["light red"]
+        elif capacity < 25:
+            fg_color = colors["light yellow"]
+        elif capacity >= 98:
+            fg_color = colors["light green"]
+
+        return "%%{+u U%s B%s} %%{F%s T2} %s %%{T1}%s%%  %%{-u B-}" % (
+            fg_color,
+            bg_color,
+            colors["foreground"],
+            icon,
+            capacity
+        )
 
     def run(self):
         current_capa = ""
@@ -102,7 +163,7 @@ class BatteryThread(StatusThread):
             if previous_capa != current_capa and previous_ac != current_ac:
                 self.q.put({
                     "id": self.id,
-                    "output": self.format_output(capa, ac)
+                    "output": self.format_output(current_capa, current_ac)
                 })
             time.sleep(self.timeout)
 
@@ -184,14 +245,25 @@ class I3Thread(StatusThread):
 class ConkyThread(StatusThread):
     def format_output(self, raw_output):
         elements = json.loads(raw_output)
-        output = []
+        output = ""
         if "cpu" in elements:
-            output.append("cpu=%s" % elements["cpu"])
+            output += "%%{T2}  %s  %%{T1}%s%% %%{F- B-}" % (
+                icons["cpu"],
+                elements["cpu"]
+            )
         if "mem" in elements:
-            output.append("mem=%s" % elements["mem"])
+            #output += "%%{F%s T3}  %%{T2}%s %s" % (
+            output += "%%{T2}  %s  %%{T1}%s%% %%{F- B-}" % (
+                icons["mem"],
+                elements["mem"]
+            )
         if "disks" in elements:
             for disk in elements["disks"]:
-                output.append("disk %s=%s" % (disk, elements["disks"][disk]))
+                output += "%%{T2}  %s  %%{T1}%s %s%% %%{F- B-}" % (
+                    icons["disk"],
+                    disk,
+                    elements["disks"][disk]
+                )
         if "interfaces" in elements:
             for intf in elements["interfaces"]:
                 intf_output = intf
@@ -215,7 +287,6 @@ class ConkyThread(StatusThread):
                     "id": self.id,
                     "output": self.format_output(line)
                 })
-
 
 
 status_queue = Queue()
