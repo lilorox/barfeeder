@@ -66,6 +66,7 @@ class StatusThread(Thread):
 
 
 class DummyThread(StatusThread):
+    """For test purposes"""
     def run(self):
         i = 0
         while True:
@@ -75,6 +76,7 @@ class DummyThread(StatusThread):
             })
             time.sleep(0.5 + 0.5 * random())
             i += 1
+
 
 
 class DateTimeThread(StatusThread):
