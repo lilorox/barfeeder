@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 from queue import Queue
 from random import random
-from subprocess import Popen, PIPE
+from subprocess import Popen, PIPE, DEVNULL
 from threading import Thread
 
 colors = {
@@ -49,9 +49,12 @@ icons = {
     "memory": "",
     "disk": "",
     "network": {
-        "upspeed": "",
-        "downspeed": "",
-        "wifi_ssid": ""
+        "upspeed": "",
+        "downspeed": "",
+        "type": {
+            "wireless": "",
+            "wired": ""
+        }
     },
 }
 
@@ -82,7 +85,7 @@ class DateTimeThread(StatusThread):
 
     def format_output(self, current_date, current_time):
         return (
-            "%%{B%s T2}   %s %%{T1} %s"
+            "%%{B%s T2}   %s %%{T1} %s   "
             "%%{T2}%s  %%{T1}%s   %%{F- B-}"
         ) % (
             colors["light black"],
@@ -214,6 +217,7 @@ class I3Thread(StatusThread):
             if output['active']
         ]
         for ws in i3conn.get_workspaces():
+            name = ws.name[1:]
             if not ws.output in active_outputs:
                 continue
             state = self.get_state(ws, event)
@@ -221,14 +225,14 @@ class I3Thread(StatusThread):
                 out += "%%{+u B%s U%s T1}   %s   %%{-u B%s F%s}" %(
                     colors["light black"],
                     colors["light red"],
-                    ws.name,
+                    name,
                     colors["background"],
                     colors["foreground"]
                 )
             else:
-                out += "%%{F%s T1}   %s   " % (
+                out += "%%{F%s T1}   %s   %%{B- F-}" % (
                     colors["light black"],
-                    ws.name,
+                    name
                 )
 
         self.q.put({
@@ -246,17 +250,43 @@ class ConkyThread(StatusThread):
     def format_output(self, raw_output):
         elements = json.loads(raw_output)
         output = ""
+
         if "cpu" in elements:
             output += "%%{T2}  %s  %%{T1}%s%% %%{F- B-}" % (
                 icons["cpu"],
                 elements["cpu"]
             )
-        if "mem" in elements:
+
+        if "memory" in elements:
             #output += "%%{F%s T3}  %%{T2}%s %s" % (
-            output += "%%{T2}  %s  %%{T1}%s%% %%{F- B-}" % (
-                icons["mem"],
-                elements["mem"]
+            output += "%%{T2}  %s  %%{T1}%s %%{F- B-}" % (
+                icons["memory"],
+                elements["memory"]
             )
+
+        if "interfaces" in elements:
+            for interface_name in elements["interfaces"]:
+                intf = elements["interfaces"][interface_name]
+                intf_type = "wired"
+                if "status" in intf and intf["status"] == "up":
+                    if "type" in intf and intf["type"] in icons["network"]["type"]:
+                        intf_type = intf["type"]
+
+                    additionnal_info = ""
+                    if intf_type == "wireless" and "ssid" in intf and "quality" in intf:
+                        additionnal_info = "%s %s%%" % (
+                            intf["ssid"],
+                            intf["quality"]
+                        )
+                    output += "%%{T2}  %s  %%{T1}%s %s %s %s %s %%{F- B-}" % (
+                        icons["network"]["type"][intf_type],
+                        additionnal_info,
+                        icons["network"]["upspeed"],
+                        intf["upspeed"],
+                        icons["network"]["downspeed"],
+                        intf["downspeed"]
+                    )
+
         if "disks" in elements:
             for disk in elements["disks"]:
                 output += "%%{T2}  %s  %%{T1}%s %s%% %%{F- B-}" % (
@@ -264,14 +294,6 @@ class ConkyThread(StatusThread):
                     disk,
                     elements["disks"][disk]
                 )
-        if "interfaces" in elements:
-            for intf in elements["interfaces"]:
-                intf_output = intf
-                if "downspeed" in elements["interfaces"][intf]:
-                    intf_output += " down=%s" % elements["interfaces"][intf]["downspeed"]
-                if "upspeed" in elements["interfaces"][intf]:
-                    intf_output += " up=%s" % elements["interfaces"][intf]["upspeed"]
-                output.append("interface %s" % intf_output)
         return output
 
     def run(self):
@@ -281,7 +303,11 @@ class ConkyThread(StatusThread):
                 "conkyrc"
             )
         )
-        with Popen(["conky", "-c", conky_config], stdout=PIPE, bufsize=1, universal_newlines=True) as p:
+        with Popen(["conky", "-c", conky_config],
+                   stdout=PIPE,
+                   stderr=DEVNULL,
+                   bufsize=1,
+                   universal_newlines=True) as p:
             for line in p.stdout:
                 self.q.put({
                     "id": self.id,
@@ -302,21 +328,35 @@ statuses = {
     "datetime": "",
     "conky": "",
 }
+lemonbar_cmd = [
+    "lemonbar",
+    "-p",
+    "-f", "NotoSans-8",
+    "-f", "FontAwesome-9",
+    "-g", "x22",
+    "-B", colors["background"],
+    "-F", colors["foreground"],
+    "-u", "3"
+]
 
 
 def main():
     for source, worker in source_threads.items():
-        print("Setup worker %s" % source)
         worker.setDaemon(True)
         worker.start()
 
-    while True:
-        obj = status_queue.get()
-        # Process info
-        statuses[obj["id"]] = obj["output"]
-        print((
-            "%%{U%s l}%s "
-            "%%{r}%s%s%s"
+    with Popen(lemonbar_cmd,
+               stdin=PIPE,
+               stdout=DEVNULL,
+               stderr=DEVNULL,
+               bufsize=1,
+               universal_newlines=True) as p:
+        while True:
+            obj = status_queue.get()
+            statuses[obj["id"]] = obj["output"]
+            threads_output = (
+                "%%{U%s l}%s "
+                "%%{r}%s%s%s\n"
             ) % (
                 colors["light red"],
                 statuses["i3"],
@@ -324,8 +364,8 @@ def main():
                 statuses["battery"],
                 statuses["datetime"]
             )
-        )
-        status_queue.task_done()
+            p.stdin.write(threads_output)
+            status_queue.task_done()
 
 if __name__ == "__main__":
     main()

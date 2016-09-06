@@ -14,15 +14,32 @@ conky.config = {
 conky.text = [[
 { \
     "cpu": "${cpu}", \
-    "mem": "${mem}", \
+    "memory": "${mem}", \
     "disks": { \
         "/": "${fs_used_perc /}", \
         "/data": "${fs_used_perc /data}" \
     }, \
     "interfaces": { \
         "wlan0": { \
-            "downspeed": "${if_up wlan0}${downspeedf wlan0}${else}down${endif}", \
-            "upspeed": "${if_up wlan0}${upspeedf wlan0}${else}down${endif}" \
+            "type": "wireless", \
+        ${if_up wlan0} \
+            "status": "up", \
+            "ssid": "${wireless_essid wlan0}", \
+            "quality": "${wireless_link_qual_perc wlan0}", \
+            "downspeed": "${downspeedf wlan0}", \
+            "upspeed": "${upspeedf wlan0}" \
+        ${else} \
+            "status": "down" \
+        ${endif} \
+        }, \
+        "eth0": { \
+        ${if_up eth0} \
+            "status": "up", \
+            "downspeed": "${downspeedf eth0}", \
+            "upspeed": "${upspeedf eth0}" \
+        ${else} \
+            "status": "down" \
+        ${endif} \
         } \
     } \
 } \
