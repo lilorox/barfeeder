@@ -16,6 +16,7 @@ First, you need to fulfill the following dependencies:
 - python-virtualenv
 - python-virtualenvwrapper
 - conky
+- Noto Sans & Font Awesome fonts in your font path
 - lemonbar
 
 Then, after having cloned this repo:
