@@ -40,7 +40,7 @@ Otherwise, you might need to take a look at `run.sh` or perhaps set the `WORKON_
 
 Just add this line in i3's config file (obviously set your path in here):
 ```
-exec --no-startup-id mkfontdir ~/.local/share/fonts && xset +fp ~/.local/share/fonts && xset fp rehash && (path_to_barfeeder)/run.sh
+exec --no-startup-id path_to_barfeeder/run.sh
 ```
 
 ## Customization
