@@ -126,6 +126,8 @@ class BatteryThread(StatusThread):
         self.sys_ac_file = sys_ac_file
 
     def format_output(self, capacity, ac_status):
+        if isinstance(capacity, str):
+            capacity = int(capacity)
         icon = ""
         fg_color = colors["foreground"]
         bg_color = colors["light black"]
@@ -159,17 +161,17 @@ class BatteryThread(StatusThread):
         while True:
             with open(self.sys_capa_file, 'r') as f:
                 current_capa = f.read().rstrip()
-                previous_capa = current_capa
 
             with open(self.sys_ac_file, 'r') as f:
                 current_ac = f.read().rstrip()
-                previous_ac = current_ac
 
             if previous_capa != current_capa and previous_ac != current_ac:
                 self.q.put({
                     "id": self.id,
                     "output": self.format_output(current_capa, current_ac)
                 })
+                previous_capa = current_capa
+                previous_ac = current_ac
             time.sleep(self.timeout)
 
 
