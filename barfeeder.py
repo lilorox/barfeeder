@@ -56,6 +56,7 @@ icons = {
             "wired": ""
         }
     },
+    "temperature": "", # no icons yet :(
 }
 
 class StatusThread(Thread):
@@ -76,7 +77,6 @@ class DummyThread(StatusThread):
             })
             time.sleep(0.5 + 0.5 * random())
             i += 1
-
 
 
 class DateTimeThread(StatusThread):
@@ -297,6 +297,13 @@ class ConkyThread(StatusThread):
                     icons["disk"],
                     disk,
                     elements["disks"][disk]
+                )
+        if "temperature" in elements:
+            for temp in elements["temperature"]:
+                output += "%%{T2}  %s  %%{T1}%s %s°C %%{F- B-}" % (
+                    icons["temperature"],
+                    temp,
+                    elements["temperature"][temp]
                 )
         return output
 

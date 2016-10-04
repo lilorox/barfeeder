@@ -6,6 +6,8 @@
 - define a configuration file for the different threads and output formats
 - add colors to the conky elements
 - add current windows name in the bar
+- template conky configuration for easier extending
+- discover network interfaces and hdd
 
 ## Refactoring
 - use .format in place of % in strings

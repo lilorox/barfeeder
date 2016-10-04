@@ -41,6 +41,9 @@ conky.text = [[
             "status": "down" \
         ${endif} \
         } \
+    }, \
+    "temperature": { \
+        "cpu": "${hwmon 1 temp 1}" \
     } \
 } \
 ]]
