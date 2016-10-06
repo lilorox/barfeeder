@@ -9,7 +9,7 @@ from datetime import datetime
 from queue import Queue
 from random import random
 from subprocess import Popen, PIPE, DEVNULL
-from threading import Thread
+from threading import Thread, Event
 
 colors = {
     "background": "#ff282828",
@@ -64,6 +64,13 @@ class StatusThread(Thread):
         super().__init__()
         self.id = source_id
         self.q = queue
+        self._stop = Event()
+
+    def stop(self):
+        self._stop.set()
+
+    def stopped(self):
+        return self._stop.isSet()
 
 
 class DummyThread(StatusThread):
@@ -71,6 +78,8 @@ class DummyThread(StatusThread):
     def run(self):
         i = 0
         while True:
+            if self.stopped():
+                return
             self.q.put({ 
                 "id": self.id,
                 "output": i
@@ -101,6 +110,8 @@ class DateTimeThread(StatusThread):
         previous_date = ""
         previous_time = ""
         while True:
+            if self.stopped():
+                return
             now = datetime.now()
             current_date = now.strftime('%d-%m-%Y')
             current_time = now.strftime('%H:%M')
@@ -159,6 +170,8 @@ class BatteryThread(StatusThread):
         current_ac = ""
         previous_ac = ""
         while True:
+            if self.stopped():
+                return
             with open(self.sys_capa_file, 'r') as f:
                 current_capa = f.read().rstrip()
 
@@ -177,7 +190,7 @@ class BatteryThread(StatusThread):
 
 class I3Thread(StatusThread):
     def __init__(self, source_id, queue,
-            timeout=3):
+            timeout=1):
         super().__init__(source_id, queue)
         self.timeout = timeout
         self.setup_i3_connection()
@@ -191,8 +204,6 @@ class I3Thread(StatusThread):
 
     def setup_i3_connection(self):
         self.i3 = i3ipc.Connection()
-        signal.signal(signal.SIGINT, self.quit)
-        signal.signal(signal.SIGTERM, self.quit)
 
         callback = lambda i3conn, event: self.on_ws_change(i3conn, event)
         self.i3.on('workspace::focus', callback)
@@ -247,6 +258,9 @@ class I3Thread(StatusThread):
     def run(self):
         self.i3.main()
         while True:
+            if self.stopped():
+                self.quit()
+                return
             time.sleep(self.timeout)
 
 
@@ -319,6 +333,9 @@ class ConkyThread(StatusThread):
                    stderr=DEVNULL,
                    bufsize=1,
                    universal_newlines=True) as p:
+            if self.stopped():
+                p.kill()
+                return
             for line in p.stdout:
                 self.q.put({
                     "id": self.id,
@@ -349,12 +366,23 @@ lemonbar_cmd = [
     "-F", colors["foreground"],
     "-u", "3"
 ]
+threads = []
 
+def quit():
+    for thread in threads:
+        thread.stop()
+
+    for thread in threads:
+        thread.join()
 
 def main():
     for source, worker in source_threads.items():
         worker.setDaemon(True)
         worker.start()
+        threads.append(worker)
+
+    signal.signal(signal.SIGINT, quit)
+    signal.signal(signal.SIGTERM, quit)
 
     with Popen(lemonbar_cmd,
                stdin=PIPE,
