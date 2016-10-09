@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import daemon
 import i3ipc
 import json
 import logging
@@ -7,6 +6,7 @@ import math
 import os
 import signal
 import time
+from daemonize import Daemonize
 from datetime import datetime
 from optparse import OptionParser
 from queue import Queue
@@ -383,6 +383,7 @@ lemonbar_cmd = [
 ]
 workers = []
 stopping = False
+daemon = None
 logger = logging.getLogger('barfeeder')
 
 
@@ -444,25 +445,26 @@ def start_workers():
             p.stdin.write(threads_output)
             status_queue.task_done()
 
-def setup_logging(log_level, log_file_handler, is_daemon):
+def setup_logging(log_level, log_file, foreground):
     logger.setLevel(log_level)
 
-    if is_daemon and log_file_handler is not None:
-        formatter = logging.Formatter(
-            fmt='%(asctime)s %(levelname)-8s %(message)s',
-            datefmt='%Y/%m/%d %H:%M:%S'
-        )
-        log_file_handler.setLevel(logging.DEBUG)
-        log_file_handler.setFormatter(formatter)
-
-        logger.addHandler(log_file_handler)
-    else:
+    if foreground:
         formatter = logging.Formatter('%(levelname)-8s %(message)s')
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.DEBUG)
         console_handler.setFormatter(formatter)
 
         logger.addHandler(console_handler)
+    else:
+        formatter = logging.Formatter(
+            fmt='%(asctime)s %(levelname)-8s %(message)s',
+            datefmt='%Y/%m/%d %H:%M:%S'
+        )
+        log_file_handler = logging.FileHandler(log_file, mode='w')
+        log_file_handler.setLevel(logging.DEBUG)
+        log_file_handler.setFormatter(formatter)
+
+        logger.addHandler(log_file_handler)
 
 def main():
     parser = OptionParser()
@@ -483,28 +485,23 @@ def main():
     if options.debug:
         log_level = logging.DEBUG
 
-    # Background task with python-daemon
-    if not options.foreground:
-        root_dir = os.path.realpath(os.path.dirname(__file__))
-        log_file = os.path.join(root_dir, "barfeeder.log")
-        log_file_handler = logging.FileHandler(log_file, mode='w')
+    root_dir = os.path.realpath(os.path.dirname(__file__))
+    pid_file = os.path.join(root_dir, "barfeeder.pid")
+    log_file = os.path.join(root_dir, "barfeeder.log")
+    setup_logging(log_level, log_file, options.foreground)
 
-        context = daemon.DaemonContext(
-            working_directory=root_dir,
-            umask=0o002
-        )
-        context.signal_map = {
-            signal.SIGTERM: quit_handler,
-            signal.SIGINT: quit_handler
-        }
-        context.file_preserve = [ log_file_handler.stream ]
+    keep_fds = [ handler.stream for handler in logger.handlers ]
 
-        with context:
-            setup_logging(log_level, log_file_handler, True)
-            start_workers()
-    else:
-        setup_logging(log_level, None, False)
-        start_workers()
+    daemon = Daemonize(
+        app="barfeeder",
+        pid=pid_file,
+        action=start_workers,
+        keep_fds=keep_fds,
+        logger=logger,
+        verbose=options.debug,
+        foreground=options.foreground
+    )
+    daemon.start()
 
 if __name__ == "__main__":
     main()
