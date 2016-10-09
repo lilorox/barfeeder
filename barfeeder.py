@@ -1,11 +1,14 @@
 #!/usr/bin/env python
+import daemon
 import i3ipc
 import json
+import logging
 import math
 import os
 import signal
 import time
 from datetime import datetime
+from optparse import OptionParser
 from queue import Queue
 from random import random
 from subprocess import Popen, PIPE, DEVNULL
@@ -64,13 +67,15 @@ class StatusThread(Thread):
         super().__init__()
         self.id = source_id
         self.q = queue
-        self._stop = Event()
+        self._stopper = Event()
+        self.logger = logging.getLogger("barfeeder.%s" % self.id)
 
-    def stop(self):
-        self._stop.set()
+    def stop_worker(self):
+        self.logger.debug("Worker %s asked to stop" % self.id)
+        self._stopper.set()
 
     def stopped(self):
-        return self._stop.isSet()
+        return self._stopper.isSet()
 
 
 class DummyThread(StatusThread):
@@ -93,6 +98,7 @@ class DateTimeThread(StatusThread):
             timeout=3):
         super().__init__(source_id, queue)
         self.timeout = timeout
+        self.logger.info("Created DateTimeThread with source %s" % source_id)
 
     def format_output(self, current_date, current_time):
         return (
@@ -107,6 +113,7 @@ class DateTimeThread(StatusThread):
         )
 
     def run(self):
+        self.logger.info("Starting DateTimeThread with source %s" % self.id)
         previous_date = ""
         previous_time = ""
         while True:
@@ -135,17 +142,19 @@ class BatteryThread(StatusThread):
         self.timeout = timeout
         self.sys_capa_file = sys_capa_file
         self.sys_ac_file = sys_ac_file
+        self.logger.info("Created BatteryThread with source %s" % source_id)
 
     def format_output(self, capacity, ac_status):
         if isinstance(capacity, str):
             capacity = int(capacity)
+        capacity = min(capacity, 100)
         icon = ""
         fg_color = colors["foreground"]
         bg_color = colors["light black"]
         if ac_status == "C":
             icon = icons["battery"]["charging"]
         else:
-            index = math.floor(capacity * len(icons["battery"]["discharging"]) / 100)
+            index = math.floor(capacity * len(icons["battery"]["discharging"]) / 100 - 1)
             icon = icons["battery"]["discharging"][index]
 
         if capacity < 10:
@@ -165,6 +174,7 @@ class BatteryThread(StatusThread):
         )
 
     def run(self):
+        self.logger.info("Starting BatteryThread with source %s" % self.id)
         current_capa = ""
         previous_capa = ""
         current_ac = ""
@@ -194,13 +204,16 @@ class I3Thread(StatusThread):
         super().__init__(source_id, queue)
         self.timeout = timeout
         self.setup_i3_connection()
-
-    def __del__(self):
-        self.quit()
-        super().__del__()
+        self.logger.info("Created I3Thread with source %s" % source_id)
 
     def quit(self):
+        self.logger.debug("Quitting i3 ipc main loop")
         self.i3.main_quit()
+
+    def stop_worker(self):
+        self.logger.debug("Worker %s asked to stop" % self.id)
+        self._stopper.set()
+        self.quit()
 
     def setup_i3_connection(self):
         self.i3 = i3ipc.Connection()
@@ -256,15 +269,15 @@ class I3Thread(StatusThread):
         })
 
     def run(self):
+        self.logger.info("Starting I3Thread with source %s" % self.id)
         self.i3.main()
-        while True:
-            if self.stopped():
-                self.quit()
-                return
-            time.sleep(self.timeout)
 
 
 class ConkyThread(StatusThread):
+    def __init__(self, source_id, queue):
+        super().__init__(source_id, queue)
+        self.logger.info("Created ConkyThread with source %s" % source_id)
+
     def format_output(self, raw_output):
         elements = json.loads(raw_output)
         output = ""
@@ -322,6 +335,7 @@ class ConkyThread(StatusThread):
         return output
 
     def run(self):
+        self.logger.info("Starting ConkyThread with source %s" % self.id)
         conky_config = os.path.realpath(
             os.path.join(
                 os.path.dirname(__file__),
@@ -333,10 +347,11 @@ class ConkyThread(StatusThread):
                    stderr=DEVNULL,
                    bufsize=1,
                    universal_newlines=True) as p:
-            if self.stopped():
-                p.kill()
-                return
+            self.logger.info("ConkyThread[%s] started conky subprocess")
             for line in p.stdout:
+                if self.stopped():
+                    p.kill()
+                    return
                 self.q.put({
                     "id": self.id,
                     "output": self.format_output(line)
@@ -366,23 +381,40 @@ lemonbar_cmd = [
     "-F", colors["foreground"],
     "-u", "3"
 ]
-threads = []
+workers = []
+stopping = False
+logger = logging.getLogger('barfeeder')
 
-def quit():
-    for thread in threads:
-        thread.stop()
 
-    for thread in threads:
-        thread.join()
+def quit_handler(signum, frame):
+    global stopping
+    global status_queue
 
-def main():
+    stopping = True
+    status_queue.empty()
+    status_queue.put_nowait({})
+
+    logger.critical("Received an interruption signal (%d)" % signum)
+    logger.debug("Stopping all workers")
+    for worker in workers:
+        logger.debug("Stopping %s worker" % worker.id)
+        worker.stop_worker()
+
+    logger.debug("Joining all workers")
+    for worker in workers:
+        logger.debug("Joining %s worker" % worker.id)
+        worker.join()
+    logger.critical("Cleanly interrupted")
+
+def start_workers():
     for source, worker in source_threads.items():
+        logger.debug("Creating and running %s worker" % source)
         worker.setDaemon(True)
         worker.start()
-        threads.append(worker)
+        workers.append(worker)
 
-    signal.signal(signal.SIGINT, quit)
-    signal.signal(signal.SIGTERM, quit)
+    signal.signal(signal.SIGINT, quit_handler)
+    signal.signal(signal.SIGTERM, quit_handler)
 
     with Popen(lemonbar_cmd,
                stdin=PIPE,
@@ -392,6 +424,12 @@ def main():
                universal_newlines=True) as p:
         while True:
             obj = status_queue.get()
+            if stopping:
+                logger.debug("Stopping lemonbar")
+                p.kill()
+                return
+
+            logger.debug("New status taken from the queue: %s" % obj)
             statuses[obj["id"]] = obj["output"]
             threads_output = (
                 "%%{U%s l}%s "
@@ -405,6 +443,68 @@ def main():
             )
             p.stdin.write(threads_output)
             status_queue.task_done()
+
+def setup_logging(log_level, log_file_handler, is_daemon):
+    logger.setLevel(log_level)
+
+    if is_daemon and log_file_handler is not None:
+        formatter = logging.Formatter(
+            fmt='%(asctime)s %(levelname)-8s %(message)s',
+            datefmt='%Y/%m/%d %H:%M:%S'
+        )
+        log_file_handler.setLevel(logging.DEBUG)
+        log_file_handler.setFormatter(formatter)
+
+        logger.addHandler(log_file_handler)
+    else:
+        formatter = logging.Formatter('%(levelname)-8s %(message)s')
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG)
+        console_handler.setFormatter(formatter)
+
+        logger.addHandler(console_handler)
+
+def main():
+    parser = OptionParser()
+    parser.add_option("-F", "--foreground",
+                      dest="foreground",
+                      help="stay on foreground and print logging on stdout",
+                      action="store_true",
+                      default=False)
+    parser.add_option("-d", "--debug",
+                      dest="debug",
+                      help="add debug information",
+                      action="store_true",
+                      default=False)
+    (options, args) = parser.parse_args()
+
+    log_level = logging.INFO
+
+    if options.debug:
+        log_level = logging.DEBUG
+
+    # Background task with python-daemon
+    if not options.foreground:
+        root_dir = os.path.realpath(os.path.dirname(__file__))
+        log_file = os.path.join(root_dir, "barfeeder.log")
+        log_file_handler = logging.FileHandler(log_file, mode='w')
+
+        context = daemon.DaemonContext(
+            working_directory=root_dir,
+            umask=0o002
+        )
+        context.signal_map = {
+            signal.SIGTERM: quit_handler,
+            signal.SIGINT: quit_handler
+        }
+        context.file_preserve = [ log_file_handler.stream ]
+
+        with context:
+            setup_logging(log_level, log_file_handler, True)
+            start_workers()
+    else:
+        setup_logging(log_level, None, False)
+        start_workers()
 
 if __name__ == "__main__":
     main()
