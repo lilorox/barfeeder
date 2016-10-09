@@ -10,3 +10,4 @@
 ## Refactoring
 - use .format in place of % in strings
 - remove output string generation from threads (more MVC approach)
+- cleanup code a bit and put threads in a separate moule
