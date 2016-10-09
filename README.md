@@ -43,6 +43,14 @@ Just add this line in i3's config file (obviously set your path in here):
 exec --no-startup-id path_to_barfeeder/run.sh
 ```
 
+## Debugging
+
+You can pass the `-d` and `-F` flags to `barfeeder.py` to, respectively, add debug information and prevent barfeeder from forking to the background.
+
+## Upcoming features
+
+See [TODO.md](TODO.md).
+
 ## Customization
 
 OK sorry, too much doc at once, I'll fill this up later :)
