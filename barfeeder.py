@@ -151,7 +151,7 @@ class BatteryThread(StatusThread):
         icon = ""
         fg_color = colors["foreground"]
         bg_color = colors["light black"]
-        if ac_status == "C":
+        if ac_status == "1" or ac_status == "C":
             icon = icons["battery"]["charging"]
         else:
             index = math.floor(capacity * len(icons["battery"]["discharging"]) / 100 - 1)
