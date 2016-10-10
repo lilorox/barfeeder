@@ -490,7 +490,7 @@ def main():
     log_file = os.path.join(root_dir, "barfeeder.log")
     setup_logging(log_level, log_file, options.foreground)
 
-    keep_fds = [ handler.stream for handler in logger.handlers ]
+    keep_fds = [ handler.stream.fileno() for handler in logger.handlers ]
 
     daemon = Daemonize(
         app="barfeeder",
@@ -499,7 +499,8 @@ def main():
         keep_fds=keep_fds,
         logger=logger,
         verbose=options.debug,
-        foreground=options.foreground
+        foreground=options.foreground,
+        chdir=root_dir
     )
     daemon.start()
 
