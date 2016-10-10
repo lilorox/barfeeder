@@ -9,6 +9,9 @@ It relies on several threads to get the information from the following sources:
 - the i3ipc python module (https://pypi.python.org/pypi/i3ipc) for workspace information from i3
 - conky for the cpu, memory, interface status and speed and partitions usage
 
+
+This work was inspired by [electro7](https://github.com/electro7/dotfiles/tree/master/.i3/lemonbar)'s dotfiles and lemonbar scripts.
+
 ## Installation
 
 First, you need to fulfill the following dependencies:
