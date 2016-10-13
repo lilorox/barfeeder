@@ -188,7 +188,7 @@ class BatteryThread(StatusThread):
             with open(self.sys_ac_file, 'r') as f:
                 current_ac = f.read().rstrip()
 
-            if previous_capa != current_capa and previous_ac != current_ac:
+            if previous_capa != current_capa or previous_ac != current_ac:
                 self.q.put({
                     "id": self.id,
                     "output": self.format_output(current_capa, current_ac)
